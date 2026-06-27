@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TikTok Heart Game</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0618; font-family: Arial, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+  #arena { position: relative; width: 400px; height: 700px; background: #0a0618; overflow: hidden; border-radius: 0; }
+  canvas#sky { position: absolute; inset: 0; width: 400px; height: 700px; }
+  #heart-main { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 80px; z-index: 4; pointer-events: none; filter: drop-shadow(0 0 12px #ff69b4); animation: heartbeat 1.2s ease-in-out infinite alternate; }
+  @keyframes heartbeat { from { transform: translate(-50%,-50%) scale(1); } to { transform: translate(-50%,-50%) scale(1.1); } }
+  @keyframes shake { 0% { transform: translate(-50%,-50%) rotate(-4deg); } 50% { transform: translate(-50%,-50%) rotate(4deg); } 100% { transform: translate(-50%,-50%) rotate(-4deg); } }
+  #danger-wrap { position: absolute; bottom: 0; left: 0; right: 0; height: 8px; background: rgba(255,255,255,0.1); z-index: 5; }
+  #danger-fill { height: 8px; width: 0%; background: #ff69b4; transition: width 0.2s, background 0.4s; }
+  #hud { position: absolute; top: 16px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 5; }
+  .hud-box { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; padding: 6px 14px; text-align: center; }
+  .hud-label { font-size: 10px; color: rgba(255,255,255,0.5); }
+  .hud-val { font-size: 18px; font-weight: bold; color: #fff; }
+  #status { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.4); font-size: 12px; z-index: 5; white-space: nowrap; }
+  #warning { position: absolute; top: 55%; left: 50%; transform: translateX(-50%); color: #ff3333; font-size: 16px; font-weight: bold; opacity: 0; z-index: 5; white-space: nowrap; text-align: center; }
+  #shield-ring { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 120px; height: 120px; border-radius: 50%; border: 3px solid #00cfff; opacity: 0; z-index: 3; pointer-events: none; transition: opacity 0.5s; }
+  #feed { position: absolute; bottom: 20px; left: 12px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 3px; }
+  .feed-item { font-size: 12px; color: rgba(255,255,255,0.7); background: rgba(0,0,0,0.4); border-radius: 6px; padding: 3px 8px; animation: feedin 0.3s ease; }
+  @keyframes feedin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+  #explosion { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 10; background: rgba(10,6,24,0.9); }
+  #explosion h2 { color: #fff; font-size: 24px; }
+  #explosion .final-score { color: #ff69b4; font-size: 32px; font-weight: bold; }
+  #explosion .sub { color: rgba(255,255,255,0.5); font-size: 14px; }
+  #restart { background: #ff69b4; color: #fff; border: none; padding: 12px 32px; border-radius: 24px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 8px; }
+  .pop { position: absolute; pointer-events: none; font-size: 16px; font-weight: bold; color: #fff; animation: popanim 1s ease-out forwards; z-index: 6; white-space: nowrap; transform: translateX(-50%); }
+  @keyframes popanim { 0% { opacity: 1; transform: translateX(-50%) translateY(0); } 100% { opacity: 0; transform: translateX(-50%) translateY(-80px); } }
+  #connect-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4444; display: inline-block; margin-right: 6px; }
+  #connect-dot.live { background: #00ff88; animation: blink 1.5s infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<div id="arena">
+  <canvas id="sky" width="400" height="700"></canvas>
+  <div id="shield-ring"></div>
+  <div id="heart-main">💗</div>
+  <div id="hud">
+    <div class="hud-box"><div class="hud-label">score</div><div class="hud-val" id="sc">0</div></div>
+    <div class="hud-box"><div class="hud-label">size</div><div class="hud-val" id="sz">1x</div></div>
+    <div class="hud-box"><div class="hud-label">saved</div><div class="hud-val" id="sv">0</div></div>
+  </div>
+  <div id="status"><span id="connect-dot"></span><span id="status-txt">Connecting...</span></div>
+  <div id="warning">⚠️ Heart about to explode!<br>Send 👼 Angel to save it!</div>
+  <div id="shield-ring"></div>
+  <div id="feed"></div>
+  <div id="danger-wrap"><div id="danger-fill"></div></div>
+  <div id="explosion">
+    <div style="font-size:80px">💔</div>
+    <h2>Heart Broken...</h2>
+    <div class="final-score" id="final-score">0</div>
+    <div class="sub">Send 👼 Angel next time to save it!</div>
+    <button id="restart">Play Again 💗</button>
+  </div>
+</div>
+
+<script>
+const heartEl = document.getElementById('heart-main');
+const dangerFill = document.getElementById('danger-fill');
+const warnEl = document.getElementById('warning');
+const shieldRing = document.getElementById('shield-ring');
+const feedEl = document.getElementById('feed');
+const explosionEl = document.getElementById('explosion');
+const skyCanvas = document.getElementById('sky');
+const sctx = skyCanvas.getContext('2d');
+const connectDot = document.getElementById('connect-dot');
+const statusTxt = document.getElementById('status-txt');
+
+let score = 0, saves = 0, danger = 0, heartSize = 80;
+let dead = false, shieldTimer = 0, slowTimer = 0;
+let lastT = 0, lastSky = 0;
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+
+function drawSky() {
+  sctx.clearRect(0, 0, 400, 700);
+  sctx.fillStyle = '#0a0618'; sctx.fillRect(0, 0, 400, 700);
+  for (let i = 0; i < 150; i++) {
+    const x = (Math.sin(i * 137.508) * 0.5 + 0.5) * 400;
+    const y = (Math.cos(i * 85.3) * 0.5 + 0.5) * 700;
+    const a = 0.15 + Math.sin(i + Date.now() * 0.0006) * 0.25;
+    sctx.fillStyle = `rgba(255,255,255,${Math.max(0,a).toFixed(2)})`;
+    sctx.beginPath(); sctx.arc(x, y, Math.random() < 0.15 ? 1.8 : 0.7, 0, Math.PI * 2); sctx.fill();
+  }
+  const g = sctx.createRadialGradient(200, 700, 60, 200, 700, 350);
+  g.addColorStop(0, 'rgba(120,20,90,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  sctx.fillStyle = g; sctx.fillRect(0, 0, 400, 700);
+}
+
+function addFeed(txt) {
+  const d = document.createElement('div'); d.className = 'feed-item'; d.textContent = txt;
+  feedEl.appendChild(d);
+  while (feedEl.children.length > 5) feedEl.removeChild(feedEl.firstChild);
+}
+
+function showPop(txt, color) {
+  const p = document.createElement('div'); p.className = 'pop';
+  p.style.left = '200px'; p.style.top = '300px'; p.style.color = color || '#fff';
+  p.textContent = txt;
+  document.getElementById('arena').appendChild(p);
+  setTimeout(() => p.remove(), 1000);
+}
+
+function handleGift(data) {
+  const { giftType, giftName, username, repeatCount = 1 } = data;
+  for (let i = 0; i < repeatCount; i++) {
+    if (giftType === 'rose') {
+      score += 50; danger = Math.max(0, danger - 3);
+      showPop('+50 💗', '#ff69b4');
+      addFeed(`🌹 @${username} sent ${giftName}! +50`);
+    } else if (giftType === 'star') {
+      slowTimer = 4000; score += 100; danger = Math.max(0, danger - 8);
+      showPop('⭐ Slow down!', '#FFD700');
+      addFeed(`⭐ @${username} sent ${giftName}! Growth slowed`);
+    } else if (giftType === 'storm') {
+      danger = Math.min(100, danger + 20);
+      showPop('⛈️ Danger +20%!', '#ff4444');
+      addFeed(`⛈️ @${username} sent ${giftName}! Danger!`);
+    } else if (giftType === 'angel') {
+      saves++; document.getElementById('sv').textContent = saves;
+      danger = Math.max(0, danger - 60); heartSize = Math.max(80, heartSize - 20);
+      score += 500; shieldTimer = 4000;
+      shieldRing.style.opacity = '1';
+      showPop('👼 HEART SAVED! +500', '#00cfff');
+      addFeed(`👼 @${username} sent ${giftName}! HEART SAVED!`);
+    }
+  }
+  document.getElementById('sc').textContent = score;
+}
+
+function explode() {
+  if (dead) return; dead = true;
+  heartEl.textContent = '💔'; heartEl.style.fontSize = '100px';
+  heartEl.style.animation = 'none';
+  setTimeout(() => {
+    explosionEl.style.display = 'flex';
+    document.getElementById('final-score').textContent = 'Score: ' + score;
+  }, 600);
+}
+
+document.getElementById('restart').onclick = function () {
+  dead = false; danger = 0; heartSize = 80; score = 0; saves = 0;
+  slowTimer = 0; shieldTimer = 0;
+  heartEl.textContent = '💗'; heartEl.style.fontSize = '80px';
+  heartEl.style.animation = 'heartbeat 1.2s ease-in-out infinite alternate';
+  explosionEl.style.display = 'none';
+  shieldRing.style.opacity = '0';
+  warnEl.style.opacity = '0';
+  document.getElementById('sc').textContent = '0';
+  document.getElementById('sv').textContent = '0';
+};
+
+function loop(ts) {
+  const dt = lastT ? Math.min(ts - lastT, 50) : 16; lastT = ts;
+  if (ts - lastSky > 2000) { drawSky(); lastSky = ts; }
+  if (dead) { requestAnimationFrame(loop); return; }
+  slowTimer = Math.max(0, slowTimer - dt);
+  shieldTimer = Math.max(0, shieldTimer - dt);
+  if (shieldTimer <= 0) shieldRing.style.opacity = '0';
+  const speed = slowTimer > 0 ? 1.2 : 3.5;
+  danger = Math.min(100, danger + speed * dt / 1000);
+  heartSize += (slowTimer > 0 ? 2 : 5) * dt / 1000;
+  heartEl.style.fontSize = Math.round(heartSize) + 'px';
+  document.getElementById('sz').textContent = (heartSize / 80).toFixed(1) + 'x';
+  const pct = Math.round(danger);
+  dangerFill.style.width = pct + '%';
+  dangerFill.style.background = pct < 50 ? '#ff69b4' : pct < 75 ? '#ff8c00' : '#ff2222';
+  warnEl.style.opacity = pct >= 80 ? '1' : '0';
+  if (pct >= 80) {
+    heartEl.style.filter = 'drop-shadow(0 0 18px #ff2222)';
+    heartEl.style.animation = 'shake 0.15s infinite';
+  } else {
+    heartEl.style.filter = 'drop-shadow(0 0 12px #ff69b4)';
+    heartEl.style.animation = 'heartbeat 1.2s ease-in-out infinite alternate';
+  }
+  score += Math.round(dt / 200);
+  if (Math.floor(ts / 500) !== Math.floor((ts - dt) / 500)) document.getElementById('sc').textContent = score;
+  if (danger >= 100) explode();
+  requestAnimationFrame(loop);
+}
+
+const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+let ws;
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => { statusTxt.textContent = 'Server connected...'; };
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'connected') { statusTxt.textContent = 'Waiting for TikTok...'; }
+    else if (data.type === 'tiktok_connected') { connectDot.className = 'live'; statusTxt.textContent = '@' + data.username + ' LIVE'; addFeed('🔴 Connected to TikTok Live!'); }
+    else if (data.type === 'tiktok_error') { statusTxt.textContent = 'TikTok error — check username'; addFeed('❌ ' + data.message); }
+    else if (data.type === 'gift') { if (!dead) handleGift(data); }
+    else if (data.type === 'chat') { addFeed(`💬 @${data.username}: ${data.message}`); }
+    else if (data.type === 'like') { addFeed(`❤️ @${data.username} liked!`); score += 5; }
+  };
+  ws.onclose = () => { statusTxt.textContent = 'Reconnecting...'; connectDot.className = ''; setTimeout(connectWS, 3000); };
+}
+
+drawSky();
+addFeed('💗 Heart is alive...');
+addFeed('👼 Send Angel gift to save it!');
+connectWS();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
