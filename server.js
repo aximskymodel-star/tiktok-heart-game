@@ -10,16 +10,15 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'your_tiktok_username';
+const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'your_username';
 
 let tiktokConnection = null;
 const clients = new Set();
 
 wss.on('connection', (ws) => {
   clients.add(ws);
-  console.log('Game client connected. Total:', clients.size);
-  ws.send(JSON.stringify({ type: 'connected', message: 'Connected to server!' }));
-  ws.on('close', () => { clients.delete(ws); });
+  ws.send(JSON.stringify({ type: 'connected' }));
+  ws.on('close', () => clients.delete(ws));
 });
 
 function broadcast(data) {
@@ -28,52 +27,62 @@ function broadcast(data) {
 }
 
 const GIFT_MAP = {
-  'Rose':      { type: 'rose',  coins: 1  },
-  'TikTok':    { type: 'rose',  coins: 1  },
-  'Heart Me':  { type: 'rose',  coins: 1  },
-  'Ice Cream': { type: 'star',  coins: 5  },
-  'Finger Heart': { type: 'star', coins: 5 },
-  'Crown':     { type: 'storm', coins: 20 },
-  'Drama Queen': { type: 'storm', coins: 20 },
-  'Angel':     { type: 'angel', coins: 50 },
-  'Universe':  { type: 'angel', coins: 100 },
-  'Lion':      { type: 'angel', coins: 500 },
+  'Rose': 'rose', 'TikTok': 'rose', 'Heart Me': 'rose', 'Sending Love': 'rose',
+  'Ice Cream': 'star', 'Finger Heart': 'star', 'Perfume': 'star', 'GG': 'star',
+  'Crown': 'storm', 'Drama Queen': 'storm', 'Thunder': 'storm',
+  'Angel': 'angel', 'Universe': 'angel', 'Lion': 'angel', 'Rocket': 'angel',
 };
 
-function connectToTikTok() {
-  console.log(`Connecting to TikTok: @${TIKTOK_USERNAME}`);
-  tiktokConnection = new WebcastPushConnection(TIKTOK_USERNAME);
+function getGiftType(name, coins) {
+  if (GIFT_MAP[name]) return GIFT_MAP[name];
+  if (coins >= 500) return 'angel';
+  if (coins >= 50) return 'storm';
+  if (coins >= 10) return 'star';
+  return 'rose';
+}
 
-  tiktokConnection.connect().then(() => {
-    console.log('Connected to TikTok Live!');
-    broadcast({ type: 'tiktok_connected', username: TIKTOK_USERNAME });
-  }).catch(err => {
-    console.error('TikTok connection error:', err.message);
-    broadcast({ type: 'tiktok_error', message: err.message });
-    setTimeout(connectToTikTok, 10000);
+function connectToTikTok() {
+  console.log(`Connecting to @${TIKTOK_USERNAME}...`);
+
+  tiktokConnection = new WebcastPushConnection(TIKTOK_USERNAME, {
+    processInitialData: false,
+    fetchRoomInfoOnConnect: false,
+    enableExtendedGiftInfo: true,
+    enableWebsocketUpgrade: true,
+    requestPollingIntervalMs: 2000,
+    clientParams: {
+      app_language: 'en-US',
+      device_platform: 'web',
+    }
   });
 
+  tiktokConnection.connect()
+    .then(() => {
+      console.log('Connected to TikTok Live!');
+      broadcast({ type: 'tiktok_connected', username: TIKTOK_USERNAME });
+    })
+    .catch(err => {
+      console.error('TikTok error:', err.message);
+      broadcast({ type: 'tiktok_error', message: 'Not live yet — waiting...' });
+      setTimeout(connectToTikTok, 30000);
+    });
+
   tiktokConnection.on('gift', (data) => {
-    const giftName = data.giftName || '';
-    const mapped = GIFT_MAP[giftName];
-    const giftType = mapped ? mapped.type : 'rose';
+    if (data.giftType === 1 && !data.repeatEnd) return;
+    const giftType = getGiftType(data.giftName, data.diamondCount);
     broadcast({
       type: 'gift',
       giftType,
-      giftName,
+      giftName: data.giftName || 'Gift',
       username: data.uniqueId || 'someone',
       coins: data.diamondCount || 0,
       repeatCount: data.repeatCount || 1,
     });
-    console.log(`Gift: ${giftName} from @${data.uniqueId}`);
+    console.log(`Gift: ${data.giftName} x${data.repeatCount} from @${data.uniqueId}`);
   });
 
   tiktokConnection.on('chat', (data) => {
-    broadcast({
-      type: 'chat',
-      username: data.uniqueId,
-      message: data.comment,
-    });
+    broadcast({ type: 'chat', username: data.uniqueId, message: data.comment });
   });
 
   tiktokConnection.on('like', (data) => {
@@ -81,14 +90,17 @@ function connectToTikTok() {
   });
 
   tiktokConnection.on('disconnected', () => {
-    console.log('TikTok disconnected. Reconnecting...');
-    setTimeout(connectToTikTok, 5000);
+    console.log('Disconnected. Reconnecting in 10s...');
+    broadcast({ type: 'tiktok_error', message: 'Reconnecting...' });
+    setTimeout(connectToTikTok, 10000);
+  });
+
+  tiktokConnection.on('error', (err) => {
+    console.error('Connection error:', err);
   });
 }
 
 connectToTikTok();
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Server on port ${PORT}`));
